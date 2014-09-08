@@ -43,6 +43,7 @@ type testsEnmarshalT struct {
 	community   string
 	requestType PDUType
 	requestid   uint32
+	msgid       uint32
 	// function and function name returning bytes from tcpdump
 	goodBytes func() []byte
 	funcName  string // could do this via reflection
@@ -62,6 +63,7 @@ var testsEnmarshal = []testsEnmarshalT{
 		"public",
 		GetRequest,
 		1871507044,
+		0,
 		kyoceraRequestBytes,
 		"kyocera_request",
 		0x0e, // pdu start
@@ -83,6 +85,7 @@ var testsEnmarshal = []testsEnmarshalT{
 		"privatelab",
 		SetRequest,
 		526895288,
+		0,
 		portOnOutgoing1,
 		"portOnOutgoing1",
 		0x11, // pdu start
@@ -97,6 +100,7 @@ var testsEnmarshal = []testsEnmarshalT{
 		"privatelab",
 		SetRequest,
 		1826072803,
+		0,
 		portOffOutgoing1,
 		"portOffOutgoing1",
 		0x11, // pdu start
@@ -223,11 +227,12 @@ func TestEnmarshalMsg(t *testing.T) {
 			Version:   test.version,
 			PDUType:   test.requestType,
 			RequestID: test.requestid,
+			MsgID:     test.msgid,
 		}
 		pdus := vbPosPdus(test)
 
 		testBytes, err := x.marshalMsg(pdus,
-			test.requestType, test.requestid)
+			test.requestType, test.msgid, test.requestid)
 		if err != nil {
 			t.Errorf("#%s: marshal() err returned: %v", test.funcName, err)
 		}
