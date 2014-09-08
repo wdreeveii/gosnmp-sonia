@@ -4,7 +4,9 @@
 * Chris Dance (@codedance)
 * Jacob Dubinsky (@jdubinsky)
 * Mattias Folke (@msfe)
+* Miroslav Genov (@mgenov)
 * Sonia Hamilton (@soniah)
+* Marcin Jurczuk (@mrspock)
 * Andreas Louca (@alouca)
 * Nathan Owens (@virtuallynathan)
 
