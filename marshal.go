@@ -15,6 +15,7 @@ import (
 	"hash"
 	"io/ioutil"
 	"log"
+	"net"
 	"sync/atomic"
 	"time"
 )
@@ -128,7 +129,8 @@ const (
 )
 
 const (
-	rxBufSize uint32 = 65536
+	rxBufSizeMin = 1024   // Minimal buffer size to handle 1 OID (see dispatch())
+	rxBufSizeMax = 131072 // Prevent memory allocation from going out of control
 )
 
 // Logger is an interface used for debugging. Both Print and
@@ -193,24 +195,14 @@ func (x *GoSNMP) sendOneRequest(pdus []SnmpPDU, packetOut *SnmpPacket) (result *
 			err = fmt.Errorf("marshal: %v", err)
 			break
 		}
-		_, err = x.Conn.Write(outBuf)
+
+		var resp []byte
+		resp, err = dispatch(x.Conn, outBuf, len(pdus))
 		if err != nil {
-			err = fmt.Errorf("Error writing to socket: %s", err.Error())
 			continue
 		}
 
-		// FIXME: If our packet exceeds our buf size we'll get a partial read
-		// and this request, and the next will fail. The correct logic would be
-		// to realloc and read more if pack len > buff size.
-		resp := make([]byte, rxBufSize, rxBufSize)
-		var n int
-		n, err = x.Conn.Read(resp)
-		if err != nil {
-			err = fmt.Errorf("Error reading from UDP: %s", err.Error())
-			continue
-		}
-
-		result, err = unmarshal(resp[:n])
+		result, err = unmarshal(resp)
 		if err != nil {
 			err = fmt.Errorf("Unable to decode packet: %s", err.Error())
 			continue
@@ -452,7 +444,7 @@ func (packet *SnmpPacket) marshalSnmpV3Header(msgid uint32) ([]byte, error) {
 	}
 
 	// maximum response msg size
-	maxmsgsize := append([]byte{0}, marshalUvarInt(rxBufSize)...)
+	maxmsgsize := append([]byte{0}, marshalUvarInt(rxBufSizeMax)...)
 	buf.Write([]byte{byte(Integer), byte(len(maxmsgsize))})
 	buf.Write(maxmsgsize)
 
@@ -1021,6 +1013,11 @@ func unmarshalVBL(packet []byte, response *SnmpPacket,
 		slog.Printf("vblLength: %d", vblLength)
 	}
 
+	// check for an empty response
+	if vblLength == 2 && packet[1] == 0x00 {
+		return response, nil
+	}
+
 	// Loop & parse Varbinds
 	for cursor < vblLength {
 		dumpBytes1(packet[cursor:], fmt.Sprintf("\nSTARTING a varbind. Cursor %d", cursor), 32)
@@ -1058,4 +1055,39 @@ func unmarshalVBL(packet []byte, response *SnmpPacket,
 		response.Variables = append(response.Variables, SnmpPDU{oidStr, v.Type, v.Value})
 	}
 	return response, nil
+}
+
+// dispatch request on network, and read the results into a byte array
+//
+// Previously, resp was allocated rxBufSize (65536) bytes ie a fixed size for
+// all responses. To decrease memory usage, resp is dynamically sized, at the
+// cost of possible additional network round trips.
+func dispatch(c net.Conn, outBuf []byte, pduCount int) ([]byte, error) {
+	var resp []byte
+	for bufSize := rxBufSizeMin * (pduCount + 1); bufSize < rxBufSizeMax; bufSize *= 2 {
+		resp = make([]byte, bufSize)
+		_, err := c.Write(outBuf)
+		if err != nil {
+			return resp, fmt.Errorf("Error writing to socket: %s", err.Error())
+		}
+		n, err := c.Read(resp)
+		if err != nil {
+			return resp, fmt.Errorf("Error reading from UDP: %s", err.Error())
+		}
+
+		if n < bufSize {
+			// Memory usage optimization. Help the runtime to release as much memory as possible.
+			//
+			// See: http://blog.golang.org/go-slices-usage-and-internals, section: A possible "gotcha"
+			// ...As mentioned earlier, re-slicing a slice doesn't make a copy of the
+			// underlying array. The full array will be kept in memory until it is no
+			// longer referenced. Occasionally this can cause the program to hold all
+			// the data in memory when only a small piece of it is needed.
+			resp = resp[:n]
+			resp2 := make([]byte, len(resp))
+			copy(resp2, resp)
+			return resp2, nil
+		}
+	}
+	return resp, fmt.Errorf("Response bufSize exceeded rxBufSizeMax (%d)", rxBufSizeMax)
 }
