@@ -448,7 +448,7 @@ func (packet *SnmpPacket) marshalSnmpV3Header(msgid uint32) ([]byte, error) {
 	}
 
 	// maximum response msg size
-	maxmsgsize := append([]byte{0}, marshalUvarInt(rxBufSizeMax)...)
+	maxmsgsize := marshalUvarInt(rxBufSizeMax)
 	buf.Write([]byte{byte(Integer), byte(len(maxmsgsize))})
 	buf.Write(maxmsgsize)
 
